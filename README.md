@@ -1,4 +1,4 @@
-# SQL Portfolio Project: Financial Fraud Detection & System Risk Analysis
+# Financial Fraud Detection & System Risk Analysis
 
 ##  Project Overview
 In the modern banking sector, identifying fraudulent activity quickly while minimizing disruptions to legitimate users is a critical challenge. This project conducts a deep-dive forensic audit of a synthetic financial dataset containing **6.3 million rows** of transaction logs. By simulating the role of a Lead Fraud Analyst, this project uncovers distinct criminal patterns, evaluates structural system risks, and assesses the effectiveness of automated banking security triggers using advanced relational database querying techniques.
