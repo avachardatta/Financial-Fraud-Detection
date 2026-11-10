@@ -1,150 +1,98 @@
-# Financial Fraud Detection & System Risk Analysis
+# Financial Fraud Analysis: Where Fraud Happens and What the Bank Misses
 
-##  Project Overview
-In the modern banking sector, identifying fraudulent activity quickly while minimizing disruptions to legitimate users is a critical challenge. This project conducts a deep-dive forensic audit of a synthetic financial dataset containing **6.3 million rows** of transaction logs. By simulating the role of a Lead Fraud Analyst, this project uncovers distinct criminal patterns, evaluates structural system risks, and assesses the effectiveness of automated banking security triggers using advanced relational database querying techniques.
+PostgreSQL analysis of 6.36 million mobile-money transactions (PaySim synthetic dataset), written for the bank's Head of Fraud Risk.
 
----
+## 1. Business problem
 
-##  Project Objectives
-* **Quantify Core Risk Exposure:** Establish baseline benchmarks for total fraud volume, overall financial impact, and transaction distribution.
-* **Isolate Criminal Mechanics:** Uncover the specific transaction types, behavioral methodologies (e.g., account-draining strategies), and destination preferences used by malicious actors.
-* **Audit Automated Defenses:** Measure the performance, accuracy, and failure rate of the bank's internal rule-based flagging systems (`isFlaggedFraud`).
-* **Identify Temporal Attack Vectors:** Detect high-risk operational windows by analyzing hourly transaction volumes to map out coordinated fraud waves.
+**Who is asking:** the Head of Fraud Risk.
 
----
+**Problem statement:** fraud cost the bank 12.06 billion over the period (8,213 fraud cases), and the current automatic alert rule is suspected to miss most of it. The Head of Fraud Risk must decide where to focus monitoring and whether to replace the alert rule. Using 6.36M transactions (type, amount, balances before and after, sender, receiver, fraud labels), find which transactions carry the fraud, what fraud looks like, and how much the current rule catches, so the team can build better alert rules.
 
-##  Project Structure & Forensic Insights
+**Questions answered:**
+1. How common is fraud, and how much money is lost?
+2. Which transaction types carry the fraud?
+3. How do fraud amounts and balances differ from normal transactions?
+4. How much fraud does the bank's current alert rule (`isFlaggedFraud`) catch?
 
-###  Phase 1: The Initial Forensic Audit
-This phase establishes our data baselines to understand the scope of fraudulent activity moving through the bank's network.
+## 2. Data
 
-```sql
--- Query 1: Calculating overall baseline fraud metrics
-SELECT 
-    COUNT(*) AS total_transactions,
-    SUM(isFraud) AS total_fraud_cases,
-    ROUND((SUM(isFraud) * 100.0) / COUNT(*), 2) AS fraud_percentage
-FROM financial_transactions;
+PaySim synthetic mobile-money dataset (public, Kaggle). One table, `financial_transactions`, 6,362,620 rows. Amounts are in the dataset's local currency units (no currency stated).
 
--- Query 2: Mapping fraud across transaction channels
-SELECT
-    type,
-    COUNT(*) AS total_transactions,
-    SUM(isFraud) AS no_of_fraud,
-    ROUND((SUM(isFraud) * 100.0) / COUNT(*), 2) AS fraud_rate_percentage
-FROM financial_transactions
-GROUP BY type
-ORDER BY no_of_fraud DESC;
-Key Insight: Out of 6,362,620 network actions, 8,213 transactions were confirmed fraud, establishing a baseline fraud rate of 0.13%.
+| Column | Meaning |
+| --- | --- |
+| step | hour of the simulation (1 step = 1 hour, 30 days) |
+| type | CASH_IN, CASH_OUT, DEBIT, PAYMENT, TRANSFER |
+| amount | transaction amount |
+| nameOrig / nameDest | sender / receiver account (C = customer, M = merchant) |
+| oldbalanceOrg / newbalanceOrig | sender balance before / after |
+| oldbalanceDest / newbalanceDest | receiver balance before / after |
+| isFraud | 1 = confirmed fraud |
+| isFlaggedFraud | 1 = flagged by the bank's current rule (transfers over 200,000) |
 
-Key Insight: Criminal activity is completely absent from standard consumer actions like PAYMENT, CASH_IN, or DEBIT. Instead, fraud is strictly isolated to TRANSFER and CASH_OUT loops, revealing the specific channels security teams must monitor.
+## 3. How I worked (7 steps)
 
- Phase 2: High-Value Financial Anomalies
-Here, we analyze the financial volume of the attacks and look closely at the "Vault Emptying" behavior.
+1. **Define:** problem statement and questions above.
+2. **Collect:** created the table and loaded the 6.36M-row CSV into PostgreSQL.
+3. **Clean:** checked row counts, data types and label values (isFraud, isFlaggedFraud are 0/1).
+4. **Explore:** counts and amounts by type and by fraud label.
+5. **Analyze:** SQL with GROUP BY, CASE, CTEs, `COUNT(*) FILTER`, and ranking (top hours, largest frauds).
+6. **Visualize:** result tables below.
+7. **Communicate:** insights and recommendations below.
 
-SQL
--- Query 3: Comparing volume ranges between normal traffic and fraud
-SELECT
-    isFraud,
-    COUNT(*) AS total_transactions,
-    MIN(amount) AS min_transaction_amt,
-    MAX(amount) AS max_transaction_amt,
-    AVG(amount) AS avg_transaction_amt
-FROM financial_transactions 
-GROUP BY isFraud;
+## 4. Key numbers
 
--- Query 4: Identifying the "Emptying the Vault" pattern
-WITH fraud_totals AS (
-    SELECT 
-        COUNT(*) AS total_fraud_cases,
-        SUM(CASE WHEN newbalanceOrig = 0 THEN 1 ELSE 0 END) AS emptied_accounts
-    FROM financial_transactions
-    WHERE isFraud = 1
-)
-SELECT 
-    total_fraud_cases,
-    emptied_accounts,
-    ROUND((emptied_accounts * 100.0) / total_fraud_cases, 2) AS emptied_percentage
-FROM fraud_totals;
-Key Insight: Fraudulent transactions carry a drastically higher average amount compared to normal transactions, showing that actors prioritize high-impact strikes over low-value retail noise.
+| Metric | Value |
+| --- | --- |
+| Transactions | 6,362,620 |
+| Fraud cases | 8,213 (**0.13%**) |
+| Money lost to fraud | **12.06 billion** |
+| Average fraud amount | 1,467,967 (**8x** the normal average of 178,197) |
+| Fraud that emptied the sender's account | 8,053 of 8,213 (**98.1%**) |
+| Fraud caught by the current rule | **16 of 8,213 (0.2%)** |
 
-Key Insight: The investigation confirmed a definitive behavioral signature: in a massive majority of verified fraud cases, the victim's account balance is left at exactly 0, proving that automated scripts are rapidly clearing out balances entirely.
+**Fraud by transaction type**
 
- Phase 3: Identity & Destination Tracking
-This phase profiles who is receiving the stolen capital and audits how well the bank's active rules are performing.
+| Type | Transactions | Fraud cases | Fraud rate |
+| --- | --- | --- | --- |
+| CASH_OUT | 2,237,500 | 4,116 | 0.18% |
+| TRANSFER | 532,909 | 4,097 | **0.77%** |
+| PAYMENT | 2,151,495 | 0 | 0% |
+| CASH_IN | 1,399,284 | 0 | 0% |
+| DEBIT | 41,432 | 0 | 0% |
 
-SQL
--- Query 5: Profiling the recipient account types (Customer vs. Merchant)
-SELECT
-    CASE 
-        WHEN LEFT(namedest, 1) = 'M' THEN 'Merchant'
-        WHEN LEFT(namedest, 1) = 'C' THEN 'Another Customer'
-        ELSE 'Unknown' 
-    END AS destination_type,
-    COUNT(*) AS total_transactions,
-    SUM(isFraud) AS total_fraud_cases
-FROM financial_transactions
-GROUP BY 1;
+## 5. Insights
 
--- Query 6: Auditing the bank's internal alert system accuracy (Using Advanced FILTER Syntax)
-SELECT
-    COUNT(*) FILTER (WHERE isFlaggedFraud = 1) AS total_flagged_by_bank,
-    COUNT(*) FILTER (WHERE isFlaggedFraud = 1 AND isFraud = 1) AS correctly_flagged_fraud,
-    COUNT(*) FILTER (WHERE isFlaggedFraud = 0 AND isFraud = 1) AS missed_fraud_cases
-FROM financial_transactions;
-Key Insight: 100% of fraud routing targets individual customer accounts (C%), evading retail merchant accounts (M%) completely. This implies illicit capital is being pushed straight into external mule accounts.
+1. **All fraud sits in two types.** TRANSFER and CASH_OUT carry 100% of fraud cases while being 44% of transactions. PAYMENT, CASH_IN and DEBIT have zero fraud.
+2. **TRANSFER is the riskiest.** Its fraud rate (0.77%) is 4x CASH_OUT (0.18%). Fraud cases are split almost evenly (4,097 vs 4,116), which fits a pattern of moving money out (TRANSFER), then withdrawing it (CASH_OUT).
+3. **Fraud empties accounts.** 98.1% of fraud transactions leave the sender's balance at exactly 0, and the average fraud is 8x larger than a normal transaction. The largest fraud amounts stop at exactly 10,000,000, which looks like a per-transaction limit.
+4. **The current alert rule almost never fires.** It flagged only 16 transactions. All 16 were fraud (no false alarms), but it **missed 8,197 cases (99.8%)**.
 
-Key Insight: The current infrastructure audit revealed an alarming systemic gap. The existing automated threshold rule (isFlaggedFraud = 1) failed to catch a massive percentage of verified fraud, showing that static regulatory flags are completely inadequate against modern, dynamic attacks.
+## 6. Recommendations
 
- Phase 4: Behavioral Timings & Peak Losses
-The final phase exposes the specific hours these attacks peak and extracts the single largest hits to map severe financial exposures.
+| Action | Why (the number) | What to watch |
+| --- | --- | --- |
+| Focus monitoring on TRANSFER and CASH_OUT only | 100% of fraud, 44% of transactions | alerts per day and fraud caught in these types |
+| Add an alert: TRANSFER or CASH_OUT that leaves the sender balance at 0 | 98.1% of frauds do this | share of fraud caught, false alarm rate |
+| Review a TRANSFER followed soon by a CASH_OUT of a similar amount | fraud splits almost evenly between the two | number of linked pairs found |
+| Replace or widen the current rule | it catches 0.2% of fraud | fraud caught vs alerts raised, monthly |
 
-SQL
--- Query 7: Isolating high-risk operational windows
-SELECT 
-    step AS hour,
-    COUNT(*) AS total_fraud_cases,
-    SUM(amount) AS total_amount_stolen
-FROM financial_transactions
-WHERE isFraud = 1
-GROUP BY step
-ORDER BY total_fraud_cases DESC
-LIMIT 5;
+## 7. Executive summary
 
--- Query 8: Documenting the multi-million dollar heists
-SELECT 
-    type, 
-    amount, 
-    nameOrig, 
-    nameDest
-FROM financial_transactions
-WHERE isFraud = 1
-ORDER BY amount DESC
-LIMIT 10;
-Key Insight: Fraud cases spike heavily in compressed, specific hourly sequences (step), indicating highly coordinated, automated script attacks designed to sweep balances bare before human oversight can intervene.
+Fraud is rare (0.13%) but expensive (12.06 billion), and all of it is in TRANSFER and CASH_OUT. The bank's current rule catches only 16 of 8,213 frauds. **Recommendation:** add a rule that flags TRANSFER/CASH_OUT transactions that empty the sender's account, which covers 98% of fraud, and test its false-alarm rate before rollout.
 
-Key Insight: The top 10 single largest fraud losses all maximize out at massive, multi-million dollar limits, pointing directly to organized asset extraction targeting high-net-worth accounts.
+## 8. Files
 
- System-Generated Reports
-To translate these raw SQL insights into operational tools for the bank's fraud department, the following reports are generated programmatically from the database to assist security teams:
+```
+financial_transactions_fraud_detection_project.sql   # table creation + all analysis queries
+```
 
-1. Daily High-Risk Threat Assessment Report
-Target Audience: Fraud Investigation Unit & Operations Managers.
+The 6.36M-row CSV is not in the repo (too large); download PaySim from Kaggle and load it into the `financial_transactions` table.
 
-Purpose: Triggers a real-time operational workflow by generating a daily list of high-value TRANSFER and CASH_OUT events where the originating account was entirely cleared out (newbalanceOrig = 0). This report isolates the highest probability fraud alerts for human analysts to review first.
+## 9. Limitations and next steps
 
-2. System Defense Performance Matrix (KPI Dashboard)
-Target Audience: Risk Compliance Officers & Chief Security Officer (CSO).
+- The data is synthetic (simulated), so patterns are realistic but not from a real bank.
+- A "balance goes to 0" rule will also flag some honest customers; its false-alarm rate needs testing on normal transactions before use.
+- One flat table was enough for this analysis; joins were not needed.
+- Next: measure the false-alarm rate of the new rule, and analyze fraud by hour (`step`) to find peak attack times.
 
-Purpose: A monthly report tracking the performance metrics of the automated detection system. It reports the False Negative Rate (how much actual fraud the automated system missed) to justify updating rules and investing in machine-learning-based detection patterns.
-
-3. Chronological Attack-Pattern Report
-Target Audience: Security Infrastructure & Database Administrators.
-
-Purpose: Maps out the exact hours (steps) experiencing anomalous surges in volume. This report allows network teams to scale server resources during high-risk script-attack windows and deploy tougher step-up authentication checks during these hours.
-
- Technical Reflection & Future Scope
-Project Design: Single-Table Architecture
-For this phase of the analysis, the entire dataset was maintained as a single, flat table (financial_transactions).
-
-The Benefit: Keeping the data in a flat structure allowed for rapid data exploration, straightforward query writing, and high-speed execution of conditional aggregations (like the FILTER clauses) without the overhead of complex JOIN operations across millions of rows
+**Tools:** PostgreSQL (GROUP BY, CASE, CTEs, FILTER, ORDER BY / LIMIT).
