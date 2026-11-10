@@ -20,7 +20,7 @@ PaySim synthetic mobile-money dataset (public, Kaggle). One table, `financial_tr
 
 | Column | Meaning |
 | --- | --- |
-| step | hour of the simulation (1 step = 1 hour, 30 days) |
+| step | hour of the simulation (1 step = 1 hour; 744 steps, about one month) |
 | type | CASH_IN, CASH_OUT, DEBIT, PAYMENT, TRANSFER |
 | amount | transaction amount |
 | nameOrig / nameDest | sender / receiver account (C = customer, M = merchant) |
